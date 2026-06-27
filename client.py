@@ -1,125 +1,185 @@
-#client
-from launcher__PONG import *
-from pygame import *
+from launcher__PONG import launcher
+
+import pygame
 import socket
 import json
-from threading import Thread
+import threading
+import time
 
-# ---ПУГАМЕ НАЛАШТУВАННЯ ---
+# ---------------- LAUNCHER ----------------
+
+host_value, port_value = launcher()
+
+print("Connecting to:", host_value, port_value)
+
+# ---------------- PYGAME ----------------
 
 WIDTH, HEIGHT = 800, 600
-init()
-screen = display.set_mode((WIDTH, HEIGHT))
-clock = time.Clock()
-display.set_caption("Пінг-Понг")
 
-background = image.load("python.png")
-background = transform.scale(background, (WIDTH, HEIGHT))
+pygame.init()
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Ping Pong Multiplayer")
+clock = pygame.time.Clock()
 
-# ---СЕРВЕР ---
+# ---------------- ASSETS ----------------
 
-def connect_to_server():
+bg = pygame.image.load("python.png")
+bg = pygame.transform.scale(bg, (WIDTH, HEIGHT))
+
+rocket_img = pygame.image.load("rocket.png")
+rocket_img = pygame.transform.scale(rocket_img, (20, 100))
+
+ball_img = pygame.image.load("ball.png")
+ball_img = pygame.transform.scale(ball_img, (30, 30))
+
+font_win = pygame.font.Font(None, 72)
+font_main = pygame.font.Font(None, 36)
+
+# ---------------- NETWORK ----------------
+
+buffer = ""
+game_state = {}
+game_over = False
+client = None
+my_id = None
+
+
+def connect():
+    global client, my_id
+
     while True:
         try:
             client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client.connect((host_value, port_value))
-            buffer = ""
-            game_state = {}
-            my_id = int(client.recv(24).decode())
-            return my_id, game_state, buffer, client
-        except:
-            pass
+
+            my_id = int(client.recv(24).decode().strip())
+
+            print("Connected as:", my_id)
+            return
+
+        except Exception as e:
+            print("Retry...", e)
+            time.sleep(1)
+
 
 def receive():
-    global buffer, game_state, game_over, client
+    global buffer, game_state, game_over
+
     while not game_over:
         try:
             data = client.recv(1024).decode()
+            if not data:
+                continue
+
             buffer += data
+
             while "\n" in buffer:
                 packet, buffer = buffer.split("\n", 1)
+
                 if packet.strip():
                     game_state = json.loads(packet)
+
         except:
-            game_state["winner"] = -1
+            game_state = {"winner": -1}
             break
 
-# --- ШРИФТИ ---
 
-font_win = font.Font(None, 72)
-font_main = font.Font(None, 36)
+# ---------------- START ----------------
 
-# --- ГРА ---
+connect()
+threading.Thread(target=receive, daemon=True).start()
 
-game_over = False
-winner = None
-you_winner = None
-my_id, game_state, buffer, client = connect_to_server()
-Thread(target=receive, daemon=True).start()
+# ---------------- GAME LOOP ----------------
 
-while True:
-    for e in event.get():
-        if e.type == QUIT:
-            exit()
+running = True
 
-    if "countdown" in game_state and game_state["countdown"] > 0:
-        screen.blit(background, (0, 0))
-        countdown_text = font.Font(None, 72).render(str(game_state["countdown"]), True, (255, 255, 255))
-        screen.blit(countdown_text, (WIDTH // 2 - 20, HEIGHT // 2 - 30))
-        display.update()
-        continue
-
-    if "winner" in game_state and game_state["winner"] is not None:
-        screen.blit(background, (0, 0))
-
-        if you_winner is None:
-            if game_state["winner"] == my_id:
-                you_winner = True
-            else:
-                you_winner = False
-
-        if you_winner:
-            text = "Ти переміг!"
-        else:
-            text = "Пощастить наступним разом!"
-
-        win_text = font_win.render(text, True, (255, 215, 0))
-        text_rect = win_text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
-        screen.blit(win_text, text_rect)
-
-        text = font_win.render('К - рестарт', True, (255, 215, 0))
-        text_rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 120))
-        screen.blit(text, text_rect)
-
-        display.update()
-        continue
-
-    if game_state:
-        screen.blit(background, (0, 0))
-
-        draw.rect(screen, (0, 255, 0), (20, game_state['paddles']['0'], 20, 100))
-        draw.rect(screen, (255, 0, 255), (WIDTH - 40, game_state['paddles']['1'], 20, 100))
-        draw.circle(screen, (255, 255, 255), (game_state['ball']['x'], game_state['ball']['y']), 10)
-
-        score_text = font_main.render(f"{game_state['scores'][0]} : {game_state['scores'][1]}", True, (255, 255, 255))
-        screen.blit(score_text, (WIDTH // 2 - 25, 20))
-
-        if game_state['sound_event']:
-            if game_state['sound_event'] == 'wall_hit':
-                pass
-            if game_state['sound_event'] == 'platform_hit':
-                pass
-
-    else:
-        screen.blit(background, (0, 0))
-        wating_text = font_main.render(f"Очікування гравців...", True, (255, 255, 255))
-        screen.blit(wating_text, (WIDTH // 2 - 25, 20))
-
-    display.update()
+while running:
     clock.tick(60)
 
-    keys = key.get_pressed()
-    if keys[K_w]:
-        client.send(b"UP")
-    elif keys[K_s]:
-        client.send(b"DOWN")
+    for e in pygame.event.get():
+        if e.type == pygame.QUIT:
+            running = False
+
+    # BACKGROUND
+    screen.blit(bg, (0, 0))
+
+    # ---------------- COUNTDOWN ----------------
+    if game_state.get("countdown", 0) > 0:
+        txt = font_win.render(str(game_state["countdown"]), True, (255, 255, 255))
+        screen.blit(txt, (WIDTH // 2 - 20, HEIGHT // 2 - 40))
+        pygame.display.update()
+        continue
+
+    # ---------------- WIN ----------------
+    if game_state.get("winner") is not None:
+        if game_state["winner"] == my_id:
+            text = "YOU WIN!"
+        else:
+            text = "YOU LOSE!"
+
+        win = font_win.render(text, True, (255, 215, 0))
+        screen.blit(win, (WIDTH // 2 - 120, HEIGHT // 2))
+        pygame.display.update()
+        continue
+
+    # ---------------- GAME ----------------
+    if game_state:
+        paddles = game_state.get("paddles", {})
+        ball = game_state.get("ball", {})
+        scores = game_state.get("scores", [0, 0])
+
+        # LEFT ROCKET
+        screen.blit(
+            rocket_img,
+            (20, paddles.get("0", 250))
+        )
+
+        # RIGHT ROCKET
+        screen.blit(
+            rocket_img,
+            (WIDTH - 40, paddles.get("1", 250))
+        )
+
+        # BALL
+        screen.blit(
+            ball_img,
+            (
+                ball.get("x", WIDTH // 2) - 15,
+                ball.get("y", HEIGHT // 2) - 15
+            )
+        )
+
+        # SCORE
+        score = font_main.render(
+            f"{scores[0]} : {scores[1]}",
+            True,
+            (255, 255, 255)
+        )
+
+        screen.blit(score, (WIDTH // 2 - 30, 20))
+
+    else:
+        wait = font_main.render("Waiting for server...", True, (255, 255, 255))
+        screen.blit(wait, (WIDTH // 2 - 120, HEIGHT // 2))
+
+    # ---------------- INPUT ----------------
+    keys = pygame.key.get_pressed()
+
+    try:
+        if keys[pygame.K_w]:
+            client.send(b"UP")
+        elif keys[pygame.K_s]:
+            client.send(b"DOWN")
+    except:
+        pass
+
+    pygame.display.update()
+
+# ---------------- EXIT ----------------
+
+try:
+    client.close()
+except:
+    pass
+
+pygame.quit()
